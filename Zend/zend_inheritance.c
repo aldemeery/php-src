@@ -1240,6 +1240,18 @@ static inheritance_status do_inheritance_check_on_method(
 		child->common.fn_flags &= ~ZEND_ACC_OVERRIDE;
 	}
 
+	/* The effect of #[\NoDiscard] is inherited along the type hierarchy: if the
+	 * parent declaration (an overridden concrete method, an abstract method, or
+	 * an interface method) is #[\NoDiscard], the overriding or implementing
+	 * method enforces the same contract at its call sites. Only the effect (the
+	 * flag) propagates; the attribute itself is not copied, so reflection still
+	 * reports it only where it was written. */
+	if ((parent_flags & ZEND_ACC_NODISCARD)
+	 && !(child->common.fn_flags & ZEND_ACC_NODISCARD)) {
+		SEPARATE_METHOD();
+		child->common.fn_flags |= ZEND_ACC_NODISCARD;
+	}
+
 #undef SEPARATE_METHOD
 
 	return INHERITANCE_SUCCESS;
@@ -2390,6 +2402,13 @@ static void zend_add_trait_method(zend_class_entry *ce, zend_string *name, zend_
 
 		if (existing_fn->common.scope == ce) {
 			/* members from the current class override trait methods */
+			/* but still inherit the effect of #[\NoDiscard] from the trait
+			 * declaration; existing_fn is the class's own method, so the flag
+			 * can be set directly without separating a shared function. */
+			if ((fn->common.fn_flags & ZEND_ACC_NODISCARD)
+			 && !(existing_fn->common.fn_flags & ZEND_ACC_NODISCARD)) {
+				existing_fn->common.fn_flags |= ZEND_ACC_NODISCARD;
+			}
 			return;
 		} else if (UNEXPECTED((existing_fn->common.scope->ce_flags & ZEND_ACC_TRAIT)
 				&& !(existing_fn->common.fn_flags & ZEND_ACC_ABSTRACT))) {

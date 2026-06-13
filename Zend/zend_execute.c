@@ -1944,11 +1944,60 @@ ZEND_COLD static zend_result ZEND_FASTCALL get_nodiscard_suffix_from_attribute(H
 	return result;
 }
 
+/* The effect of #[\NoDiscard] is inherited, but the attribute itself is not
+ * copied onto the overriding/implementing method (see zend_inheritance.c). When
+ * the dispatched function carries no #[\NoDiscard] attribute of its own, the
+ * reason text — if any — lives on the nearest declaration in the type hierarchy
+ * that does. This walk runs only on the warning (cold) path. */
+ZEND_COLD static const zend_function *zend_nodiscard_reason_origin(const zend_function *fbc)
+{
+	if (fbc->common.attributes
+	 && zend_get_attribute_str(fbc->common.attributes, "nodiscard", sizeof("nodiscard")-1)) {
+		return fbc;
+	}
+
+	zend_class_entry *scope = fbc->common.scope;
+	if (!scope || !fbc->common.function_name) {
+		return fbc;
+	}
+
+	zend_string *lcname = zend_string_tolower(fbc->common.function_name);
+	const zend_function *origin = fbc;
+
+	/* The nearest ancestor in the extends chain wins. */
+	for (zend_class_entry *ce = scope->parent; ce; ce = ce->parent) {
+		zend_function *fn = zend_hash_find_ptr(&ce->function_table, lcname);
+		if (fn && fn->common.attributes
+		 && zend_get_attribute_str(fn->common.attributes, "nodiscard", sizeof("nodiscard")-1)) {
+			origin = fn;
+			goto out;
+		}
+	}
+
+	/* Otherwise any interface in the flattened, transitive interface set.
+	 * The interfaces pointer is only valid once the class is linked, which it
+	 * always is by the time a call to one of its methods can be dispatched. */
+	for (uint32_t i = 0; (scope->ce_flags & ZEND_ACC_LINKED) && i < scope->num_interfaces; i++) {
+		zend_class_entry *iface = scope->interfaces[i];
+		zend_function *fn = zend_hash_find_ptr(&iface->function_table, lcname);
+		if (fn && fn->common.attributes
+		 && zend_get_attribute_str(fn->common.attributes, "nodiscard", sizeof("nodiscard")-1)) {
+			origin = fn;
+			break;
+		}
+	}
+
+out:
+	zend_string_release(lcname);
+	return origin;
+}
+
 ZEND_API ZEND_COLD void ZEND_FASTCALL zend_nodiscard_function(const zend_function *fbc)
 {
 	zend_string *message_suffix = ZSTR_EMPTY_ALLOC();
+	const zend_function *origin = zend_nodiscard_reason_origin(fbc);
 
-	if (get_nodiscard_suffix_from_attribute(fbc->common.attributes, fbc->common.scope, &message_suffix) == FAILURE) {
+	if (get_nodiscard_suffix_from_attribute(origin->common.attributes, origin->common.scope, &message_suffix) == FAILURE) {
 		return;
 	}
 

@@ -19,6 +19,18 @@ PHP 8.6 UPGRADE NOTES
 1. Backward Incompatible Changes
 ========================================
 
+- Core:
+  . The effect of the #[\NoDiscard] attribute is now inherited along the type
+    hierarchy. If a method's declaration carries #[\NoDiscard] anywhere in the
+    type's hierarchy (an interface, an abstract or concrete parent method, or a
+    composed trait method), discarding the return value at a call site emits a
+    warning, even when the called method is a fresh declaration in a subclass or
+    implementing class. Previously the warning was only emitted when the called
+    method's declaration directly carried the attribute. The attribute itself is
+    still not inherited as metadata: ReflectionMethod::getAttributes() continues
+    to report it only on the declaration where it was written.
+    RFC: https://wiki.php.net/rfc/inherit-the-effect-of-nodiscard
+
 - PCRE:
   . preg_grep() now returns false instead of a partial array when a PCRE
     execution error occurs (e.g. malformed UTF-8 input with the /u modifier).
